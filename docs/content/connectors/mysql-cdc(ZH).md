@@ -6,7 +6,7 @@ MySQL CDC 连接器允许从 MySQL 数据库读取快照数据和增量数据。
 
 | Connector                                                | Database                                                                                                                                                                                                                                                                                                                                                                                               | Driver                  |
 |-----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------|
-| [mysql-cdc](mysql-cdc(ZH).md)         | <li> [MySQL](https://dev.mysql.com/doc): 5.6, 5.7, 8.0.x <li> [RDS MySQL](https://www.aliyun.com/product/rds/mysql): 5.6, 5.7, 8.0.x <li> [PolarDB MySQL](https://www.aliyun.com/product/polardb): 5.6, 5.7, 8.0.x <li> [Aurora MySQL](https://aws.amazon.com/cn/rds/aurora): 5.6, 5.7, 8.0.x <li> [MariaDB](https://mariadb.org): 10.x <li> [PolarDB X](https://github.com/ApsaraDB/galaxysql): 2.0.1 | JDBC Driver: 8.0.21     |
+| [mysql-cdc](mysql-cdc(ZH).md)         | <li> [MySQL](https://dev.mysql.com/doc): 5.6, 5.7, 8.0.x <li> [RDS MySQL](https://www.aliyun.com/product/rds/mysql): 5.6, 5.7, 8.0.x <li> [PolarDB MySQL](https://www.aliyun.com/product/polardb): 5.6, 5.7, 8.0.x <li> [Aurora MySQL](https://aws.amazon.com/cn/rds/aurora): 5.6, 5.7, 8.0.x <li> [MariaDB](https://mariadb.org): 10.x <li> [PolarDB X](https://github.com/ApsaraDB/galaxysql): 2.0.1 | JDBC Driver: 8.0.27     |
 
 依赖
 ------------
@@ -236,21 +236,21 @@ Flink SQL> SELECT * FROM orders;
       <td>scan.startup.specific-offset.gtid-set</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
-      <td>Long</td>
+      <td>String</td>
       <td>在 "specific-offset" 启动模式下，启动位点的 GTID 集合。</td>
     </tr>
     <tr>
       <td>scan.startup.specific-offset.skip-events</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
-      <td>String</td>
+      <td>Long</td>
       <td>在指定的启动位点后需要跳过的事件数量。</td>
     </tr>
     <tr>
       <td>scan.startup.specific-offset.skip-rows</td>
       <td>optional</td>
       <td style="word-wrap: break-word;">(none)</td>
-      <td>String</td>
+      <td>Long</td>
       <td>在指定的启动位点后需要跳过的数据行数量。</td>
     </tr>
     <tr>
@@ -589,8 +589,10 @@ CREATE TABLE mysql_source (...) WITH (
 )
 ```
 
-**注意**：MySQL source 会在 checkpoint 时将当前位点以 INFO 级别打印到日志中，日志前缀为 "Binlog offset on checkpoint {checkpoint-id}"。
+**注意**：
+1. MySQL source 会在 checkpoint 时将当前位点以 INFO 级别打印到日志中，日志前缀为 "Binlog offset on checkpoint {checkpoint-id}"。
 该日志可以帮助将作业从某个 checkpoint 的位点开始启动的场景。
+2. 如果捕获变更的表曾经发生过表结构变化，从最早位点、特定位点或时间戳启动可能会发生错误，因为 Debezium 读取器会在内部保存当前的最新表结构，结构不匹配的早期数据无法被正确解析。
 
 
 ### DataStream Source
