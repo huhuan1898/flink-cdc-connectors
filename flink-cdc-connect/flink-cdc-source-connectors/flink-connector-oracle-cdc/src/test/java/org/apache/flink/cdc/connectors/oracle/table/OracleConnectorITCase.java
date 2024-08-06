@@ -17,6 +17,7 @@
 
 package org.apache.flink.cdc.connectors.oracle.table;
 
+import org.apache.flink.api.common.time.Deadline;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableResult;
@@ -39,6 +40,7 @@ import org.testcontainers.lifecycle.Startables;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,6 +55,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.flink.api.common.JobStatus.RUNNING;
 import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase.CONNECTOR_PWD;
 import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase.CONNECTOR_USER;
 import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase.ORACLE_CONTAINER;
@@ -60,6 +63,7 @@ import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase
 import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase.createAndInitialize;
 import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase.getJdbcConnection;
 import static org.apache.flink.cdc.connectors.oracle.source.OracleSourceTestBase.getJdbcConnectionAsDBA;
+import static org.apache.flink.cdc.connectors.oracle.testutils.OracleTestUtils.waitForJobStatus;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
@@ -597,8 +601,11 @@ public class OracleConnectorITCase {
 
         // async submit job
         TableResult result = tEnv.executeSql("INSERT INTO sink SELECT * FROM debezium_source");
-        // wait for the source startup, we don't have a better way to wait it, use sleep for now
-        Thread.sleep(10000L);
+
+        waitForJobStatus(
+                result.getJobClient().get(),
+                Collections.singletonList(RUNNING),
+                Deadline.fromNow(Duration.ofSeconds(10)));
 
         try (Connection connection = getJdbcConnection();
                 Statement statement = connection.createStatement()) {
@@ -838,6 +845,82 @@ public class OracleConnectorITCase {
         List<String> actual = TestValuesTableFactory.getResults("sink");
         Collections.sort(actual);
         assertEquals(Arrays.asList(expected), actual);
+        result.getJobClient().get().cancel().get();
+    }
+
+    @Test
+    public void testPrimaryKeyQuote() throws Throwable {
+        createAndInitialize("corner_case_test.sql");
+
+        String sourceDDL =
+                String.format(
+                        "CREATE TABLE quote_primary_key_source ("
+                                + " `KEY` INT NOT NULL,"
+                                + " NAME STRING,"
+                                + " DESCRIPTION STRING,"
+                                + " WEIGHT DECIMAL(10,3),"
+                                + " PRIMARY KEY (`KEY`) NOT ENFORCED"
+                                + ") WITH ("
+                                + " 'connector' = 'oracle-cdc',"
+                                + " 'hostname' = '%s',"
+                                + " 'port' = '%s',"
+                                + " 'username' = '%s',"
+                                + " 'password' = '%s',"
+                                + " 'scan.incremental.snapshot.enabled' = '%s',"
+                                + " 'debezium.log.mining.strategy' = 'online_catalog',"
+                                + " 'debezium.database.history.store.only.captured.tables.ddl' = 'true',"
+                                + " 'database-name' = 'ORCLCDB',"
+                                + " 'schema-name' = '%s',"
+                                + " 'table-name' = '%s' ,"
+                                + " 'scan.startup.mode' = 'latest-offset'"
+                                + ")",
+                        ORACLE_CONTAINER.getHost(),
+                        ORACLE_CONTAINER.getOraclePort(),
+                        "dbzuser",
+                        "dbz",
+                        parallelismSnapshot,
+                        "debezium",
+                        "quote_primary_key");
+        String sinkDDL =
+                "CREATE TABLE sink "
+                        + " WITH ("
+                        + " 'connector' = 'values',"
+                        + " 'sink-insert-only' = 'false'"
+                        + ") LIKE quote_primary_key_source (EXCLUDING OPTIONS)";
+        tEnv.executeSql(sourceDDL);
+        tEnv.executeSql(sinkDDL);
+
+        // async submit job
+        TableResult result =
+                tEnv.executeSql("INSERT INTO sink SELECT * FROM quote_primary_key_source");
+
+        waitForJobStatus(
+                result.getJobClient().get(),
+                Collections.singletonList(RUNNING),
+                Deadline.fromNow(Duration.ofSeconds(10)));
+
+        try (Connection connection = getJdbcConnection();
+                Statement statement = connection.createStatement()) {
+
+            statement.execute(
+                    "INSERT INTO debezium.quote_primary_key VALUES (110,'jacket','water resistent white wind breaker',0.2)"); // 110
+            statement.execute(
+                    "INSERT INTO debezium.quote_primary_key VALUES (111,'scooter','Big 2-wheel scooter ',5.18)");
+            statement.execute(
+                    "UPDATE debezium.quote_primary_key SET description='new water resistent white wind breaker', weight=0.5 WHERE \"key\"=110");
+            statement.execute(
+                    "UPDATE debezium.quote_primary_key SET weight=5.17 WHERE \"key\"=111");
+            statement.execute("DELETE FROM debezium.quote_primary_key WHERE \"key\"=111");
+        }
+
+        waitForSinkSize("sink", 7);
+
+        String[] expected =
+                new String[] {"+I[110, jacket, new water resistent white wind breaker, 0.500]"};
+
+        List<String> actual = TestValuesTableFactory.getResults("sink");
+        assertThat(actual, containsInAnyOrder(expected));
+
         result.getJobClient().get().cancel().get();
     }
 
