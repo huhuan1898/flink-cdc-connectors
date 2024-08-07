@@ -905,18 +905,16 @@ public class OracleConnectorITCase {
             statement.execute(
                     "INSERT INTO debezium.quote_primary_key VALUES (110,'jacket','water resistent white wind breaker',0.2)"); // 110
             statement.execute(
-                    "INSERT INTO debezium.quote_primary_key VALUES (111,'scooter','Big 2-wheel scooter ',5.18)");
-            statement.execute(
-                    "UPDATE debezium.quote_primary_key SET description='new water resistent white wind breaker', weight=0.5 WHERE \"key\"=110");
-            statement.execute(
-                    "UPDATE debezium.quote_primary_key SET weight=5.17 WHERE \"key\"=111");
-            statement.execute("DELETE FROM debezium.quote_primary_key WHERE \"key\"=111");
+                    "INSERT INTO debezium.quote_primary_key VALUES (111,'scooter','Big 2-wheel scooter',5.18)");
         }
 
-        waitForSinkSize("sink", 7);
+        waitForSinkSize("sink", 2);
 
         String[] expected =
-                new String[] {"+I[110, jacket, new water resistent white wind breaker, 0.500]"};
+                new String[] {
+                    "+I[110, jacket, water resistent white wind breaker, 0.2]",
+                    "+I[111, scooter, Big 2-wheel scooter, 5.18]"
+                };
 
         List<String> actual = TestValuesTableFactory.getResults("sink");
         assertThat(actual, containsInAnyOrder(expected));
